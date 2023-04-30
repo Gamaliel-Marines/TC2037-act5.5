@@ -105,7 +105,15 @@ void wait_to_cross(Car *car) {
 void arrive_bridge(Car *car) {
     waiting(car); // Log
 
-    // No se puede pasar
+    pthread_mutex_lock(&mutex_lock_bridge);
+
+    // No hay ningún carro en el puente
+    if (bridge_direction == NONE) {
+        // Ponerlo en esta dirección
+        bridge_direction = car->direction;
+    };
+
+
     if (
         bridge_direction != car->direction || // Sentido opuesto
         number_cars == 3  // Lleno
@@ -113,13 +121,11 @@ void arrive_bridge(Car *car) {
         wait_to_cross(car);
     };
 
-    if (bridge_direction == NONE) { // No hay ningún carro en el puente
-        // Ponerlo en esta dirección
-        bridge_direction = car->direction;
-    };
 
     number_cars += 1;
     car->state = CROSSING;
+
+    pthread_mutex_unlock(&mutex_lock_bridge);
 };
 
 void cross_bridge(Car *car) {
@@ -129,6 +135,8 @@ void cross_bridge(Car *car) {
 
 void exit_bridge(Car *car) {
     finishing(car);
+
+    pthread_mutex_lock(&mutex_lock_bridge);
 
     car->state = END;
     number_cars -= 1;
@@ -140,6 +148,8 @@ void exit_bridge(Car *car) {
     } else {
         release(car);
     };
+
+    pthread_mutex_unlock(&mutex_lock_bridge);
 };
 
 void* cross(void* param) {
@@ -147,8 +157,6 @@ void* cross(void* param) {
     car = (Car*) param;
 
     while (true) {
-        pthread_mutex_lock(&mutex_lock_bridge);
-
         // Aún no está cruzando
         if(car->state == WAITING) {
             arrive_bridge(car);
@@ -163,8 +171,6 @@ void* cross(void* param) {
         if(car->state == FINISHED) {
             exit_bridge(car);
         };
-
-        pthread_mutex_unlock(&mutex_lock_bridge);
     };
 
     pthread_exit(NULL);
@@ -175,17 +181,21 @@ int main(int argc, char* argv[]) {
     pthread_t cars_threads[CARS];
     Car cars[CARS];
 
+    pthread_mutex_init(&mutex_lock_bridge, NULL);
+    pthread_cond_init(&can_cross_n_to_s, NULL);
+    pthread_cond_init(&can_cross_s_to_n, NULL);
+
     for(int i = 0; i < CARS; i++){ 
         cars[i].id = i + 1;
         cars[i].state = WAITING;
 
         if (i % 2 == 0) {
             cars[i].direction = NORTH_TO_SOUTH;
-            pthread_create(&cars_threads[i], NULL, cross, &cars[i]);
         } else {
             cars[i].direction = SOUTH_TO_NORTH;
-            pthread_create(&cars_threads[i], NULL, cross, &cars[i]);
-        }
+        };
+
+        pthread_create(&cars_threads[i], NULL, cross, &cars[i]);
     }
 
     for(int i = 0; i < CARS; i++){
