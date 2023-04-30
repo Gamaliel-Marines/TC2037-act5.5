@@ -33,16 +33,9 @@ typedef struct {
     states state;
 } Car;
 
-struct bridge{
-    int number_cars;
-    directions direction;
-};
-
 // Bridge
 int number_cars = 0;
 directions bridge_direction = NONE;
-
-int ids[CARS];
 
 pthread_cond_t can_cross_n_to_s;
 pthread_cond_t can_cross_s_to_n;
