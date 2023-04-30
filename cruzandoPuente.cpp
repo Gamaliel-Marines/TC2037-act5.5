@@ -12,35 +12,185 @@
 using namespace std;
 
 const int CARS = 8;
-const int MAX_THREADS = 8;
 const int SLEEP_TIME = 1;
 
-enum{
+enum states {
     CROSSING,
-    WAITING
-} state[CARS];
+    WAITING,
+    FINISHED,
+    END
+};
+
+enum directions {
+    NORTH_TO_SOUTH,
+    SOUTH_TO_NORTH,
+    NONE
+};
+
+typedef struct {
+    int id;
+    directions direction;
+    states state;
+} Car;
+
+struct bridge{
+    int number_cars;
+    directions direction;
+};
+
+// Bridge
+int number_cars = 0;
+directions bridge_direction = NONE;
 
 int ids[CARS];
 
-pthread_t tids[MAX_THREADS];
-pthread_cond_t areCarsCrossing;
+pthread_cond_t can_cross_n_to_s;
+pthread_cond_t can_cross_s_to_n;
 pthread_mutex_t mutex_lock_bridge;
 
+void waiting(Car *car) {
+    // No está cruzando
+    if (car->state != WAITING) return;
 
-void waiting(int id) {
+    if (car->direction == NORTH_TO_SOUTH) {
+        cout << "Carro (" << car->id << "), está esperando a cruzar de norte a sur" << endl;
+    } else if (car->direction == SOUTH_TO_NORTH) {
+        cout << "Carro (" << car->id << "), está esperando a cruzar de sur a norte" << endl;
+    }
     sleep(SLEEP_TIME);
 }
 
-void crossing(int id) {
-    std::cout << "card: " << id << " is crossing." << std::endl;
+void crossing(Car *car) {
+    // No está cruzando
+    if (car->state != CROSSING) return;
+
+    // Cruzando
+    if (car->direction == NORTH_TO_SOUTH) {
+        cout << "Carro (" << car->id << "), está cruzando de norte a sur" << endl;
+    } else if (car->direction == SOUTH_TO_NORTH) {
+        cout << "Carro (" << car->id << "), está cruzando de sur a norte" << endl;
+    }
     sleep(SLEEP_TIME);
 }
 
-void test(int i) {
+void finishing(Car *car) {
+    // No está cruzando
+    if (car->state != FINISHED) return;
+
+    // Cruzando
+    if (car->direction == NORTH_TO_SOUTH) {
+        cout << "Carro (" << car->id << "), terminó de cruzar de norte a sur" << endl;
+    } else if (car->direction == SOUTH_TO_NORTH) {
+        cout << "Carro (" << car->id << "), terminó de cruzar de sur a norte" << endl;
+    }
+    sleep(SLEEP_TIME);
 }
+
+void release(Car *car) {
+    if (car->direction == NORTH_TO_SOUTH) {
+        pthread_cond_signal(&can_cross_n_to_s);
+    } else if (car->direction == SOUTH_TO_NORTH){
+        pthread_cond_signal(&can_cross_s_to_n);
+    };
+};
+
+void wait_to_cross(Car *car) {
+    if (car->direction == NORTH_TO_SOUTH) {
+        pthread_cond_wait(&can_cross_n_to_s, &mutex_lock_bridge);
+    } else if (car->direction == SOUTH_TO_NORTH){
+        pthread_cond_wait(&can_cross_s_to_n, &mutex_lock_bridge);
+    };
+};
+
+void arrive_bridge(Car *car) {
+    waiting(car); // Log
+
+    // No se puede pasar
+    if (
+        bridge_direction != car->direction || // Sentido opuesto
+        number_cars == 3  // Lleno
+    ) {
+        wait_to_cross(car);
+    };
+
+    if (bridge_direction == NONE) { // No hay ningún carro en el puente
+        // Ponerlo en esta dirección
+        bridge_direction = car->direction;
+    };
+
+    number_cars += 1;
+    car->state = CROSSING;
+};
+
+void cross_bridge(Car *car) {
+    crossing(car);
+    car->state = FINISHED;
+};
+
+void exit_bridge(Car *car) {
+    finishing(car);
+
+    car->state = END;
+    number_cars -= 1;
+
+    if (number_cars == 0) {
+        bridge_direction = NONE;
+        pthread_cond_signal(&can_cross_n_to_s);
+        pthread_cond_signal(&can_cross_s_to_n);
+    } else {
+        release(car);
+    };
+};
+
+void* cross(void* param) {
+    Car* car;
+    car = (Car*) param;
+
+    while (true) {
+        pthread_mutex_lock(&mutex_lock_bridge);
+
+        // Aún no está cruzando
+        if(car->state == WAITING) {
+            arrive_bridge(car);
+        };
+
+        // Cruzando
+        if(car->state == CROSSING) {
+            cross_bridge(car);
+        };
+
+        // Saliendo
+        if(car->state == FINISHED) {
+            exit_bridge(car);
+        };
+
+        pthread_mutex_unlock(&mutex_lock_bridge);
+    };
+
+    pthread_exit(NULL);
+};
 
 
 int main(int argc, char* argv[]) {
+    pthread_t cars_threads[CARS];
+    Car cars[CARS];
+
+    for(int i = 0; i < CARS; i++){ 
+        cars[i].id = i + 1;
+        cars[i].state = WAITING;
+
+        if (i % 2 == 0) {
+            cars[i].direction = NORTH_TO_SOUTH;
+            pthread_create(&cars_threads[i], NULL, cross, &cars[i]);
+        } else {
+            cars[i].direction = SOUTH_TO_NORTH;
+            pthread_create(&cars_threads[i], NULL, cross, &cars[i]);
+        }
+    }
+
+    for(int i = 0; i < CARS; i++){
+        pthread_join(cars_threads[i], NULL);
+    }
 
     return 0;
 }
